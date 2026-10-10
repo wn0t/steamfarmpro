@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Steam Multi-Farm PRO</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { background-color: #09090b; color: #fafafa; font-family: 'Inter', sans-serif; }
+        .log-box { font-family: 'Fira Code', monospace; font-size: 0.72rem; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; animation: fadeIn 0.3s ease; }
+        .tab-btn.active { border-bottom: 2px solid #818cf8; color: #818cf8; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        .log-info { color: #60a5fa; }
+        .log-success { color: #4ade80; }
+        .log-warning { color: #facc15; }
+        .log-error { color: #f87171; font-weight: bold; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col p-4">
+    <div class="flex-1 w-full max-w-md mx-auto flex flex-col">
+        <h1 class="text-3xl font-black mt-2 mb-1 text-center text-transparent bg-clip-text bg-gradient-to-r from-blue-500 to-purple-500 tracking-tight">
+            Steam Multi-Farm
+        </h1>
+        <p class="text-center text-xs text-gray-500 mb-4">PRO v3.0 — SAM via rede · QR Code · Web Login</p>
+
+        <!-- Abas -->
+        <div class="flex mb-4 border-b border-gray-800">
+            <button class="tab-btn active flex-1 py-3 text-sm font-semibold text-gray-400 transition" onclick="switchTab(event,'sessao')">Sessão</button>
+            <button class="tab-btn flex-1 py-3 text-sm font-semibold text-gray-400 transition" onclick="switchTab(event,'main')">Painel</button>
+            <button class="tab-btn flex-1 py-3 text-sm font-semibold text-gray-400 transition" onclick="switchTab(event,'achievements')">Conquistas</button>
+        </div>
+
+        <!-- ============ ABA SESSÃO (Etapa 2) ============ -->
+        <div id="sessao" class="tab-content active space-y-4 flex-1">
+            <!-- MÉTODO 1: Senha -->
+            <div class="p-5 bg-[#18181b] rounded-xl border border-gray-800">
+                <h3 class="text-sm font-bold text-gray-300 mb-3">1 · Senha + Steam Guard</h3>
+                <div id="loggedAs" class="hidden mb-3 p-3 bg-emerald-900/30 border border-emerald-700 rounded-xl text-xs text-emerald-300 flex items-center justify-between">
+                    <span id="loggedAsText">✅ Logado</span>
+                    <button onclick="logout()" class="text-red-400 hover:text-red-300 font-bold">Sair (apagar sessão)</button>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <input type="text" id="username" placeholder="Usuário" class="w-full p-3 bg-[#0d0d10] rounded-xl border border-gray-800 focus:border-blue-500 outline-none text-sm">
+                    <input type="password" id="password" placeholder="Senha" class="w-full p-3 bg-[#0d0d10] rounded-xl border border-gray-800 focus:border-blue-500 outline-none text-sm">
+                </div>
+                <input type="text" id="sharedSecret" placeholder="Shared Secret (2FA auto, opcional)" class="w-full mt-3 p-3 bg-[#0d0d10] rounded-xl border border-gray-800 outline-none text-sm">
+                <label class="flex items-center gap-2 mt-3 text-xs text-gray-400">
+                    <input type="checkbox" id="remember" checked class="accent-blue-600"> Salvar credenciais (criptografadas AES-256)
+                </label>
+                <button onclick="loginPassword()" class="w-full mt-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:opacity-90 text-white font-bold py-3 rounded-xl shadow-lg transition">🔑 Entrar com Senha</button>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <div class="flex-1 h-px bg-gray-800"></div>
+                <span class="text-xs text-gray-600 uppercase">ou</span>
+                <div class="flex-1 h-px bg-gray-800"></div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <!-- MÉTODO 2: QR -->
+                <div class="p-4 bg-[#18181b] rounded-xl border border-gray-800 flex flex-col items-center">
+                    <h3 class="text-sm font-bold text-gray-300 mb-2 text-center">2 · QR Code</h3>
+                    <button onclick="startQrLogin()" class="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2.5 rounded-lg text-sm shadow transition">📱 Gerar QR</button>
+                </div>
+                <!-- MÉTODO 3: Web cookie -->
+                <div class="p-4 bg-[#18181b] rounded-xl border border-gray-800">
+                    <h3 class="text-sm font-bold text-gray-300 mb-2 text-center">3 · Web (Cookie)</h3>
+                    <button onclick="showWebLogin()" class="w-full bg-teal-600 hover:bg-teal-500 text-white font-bold py-2.5 rounded-lg text-sm shadow transition">🌐 Colar Cookie</button>
+                </div>
+            </div>
+
+            <!-- Form web cookie (hidden) -->
+            <div id="webLoginBox" class="hidden p-4 bg-[#0f0f12] rounded-xl border border-gray-800">
+                <p class="text-xs text-gray-500 mb-2">No navegador, faça login na Steam, F12 → Application → Cookies → copie o valor de <code class="text-teal-400">steamLoginSecure</code>:</p>
+                <input type="text" id="webCookie" placeholder="steamLoginSecure=7656...||eyJ..." class="w-full p-2.5 bg-black rounded-lg border border-gray-800 outline-none text-xs font-mono">
+                <button onclick="loginWeb()" class="w-full mt-2 bg-teal-600 hover:bg-teal-500 text-white font-bold py-2.5 rounded-lg text-sm">Conectar Modo Web</button>
+            </div>
+        </div>
+
+        <!-- ============ ABA PAINEL ============ -->
+        <div id="main" class="tab-content space-y-4 flex-1">
+            <div class="p-5 bg-[#18181b] rounded-xl border border-gray-800 space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-400 mb-1">Modo de Operação</label>
+                        <select id="mode" class="w-full p-3 bg-[#0d0d10] rounded-xl border border-gray-800 outline-none text-purple-400 font-semibold text-sm">
+                            <option value="hours">⌚ Farm de Horas</option>
+                            <option value="cards">🃏 Farm de Cartas</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-400 mb-1">Visibilidade</label>
+                        <select id="status" class="w-full p-3 bg-[#0d0d10] rounded-xl border border-gray-800 outline-none text-sm">
+                            <option value="invisible">Invisível 👻</option>
+                            <option value="online">Online 🟢</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-gray-400 mb-1">AppIDs (Máx 32 jogos)</label>
+                    <input type="text" id="games" placeholder="Ex: 730, 440, 252490" class="w-full p-3 bg-[#0d0d10] rounded-xl border border-gray-800 outline-none text-sm">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-gray-400 mb-1">Título Customizado (opcional)</label>
+                    <input type="text" id="customTitle" placeholder="Ex: Jogando algo secreto" class="w-full p-3 bg-[#0d0d10] rounded-xl border border-gray-800 outline-none text-sm">
+                </div>
+
+                <div class="flex gap-2 pt-2" id="controls">
+                    <button type="button" id="btnStart" onclick="startFarm()" class="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:opacity-90 text-white font-bold py-4 rounded-xl shadow-lg transition">🚀 Iniciar Motor</button>
+                    <button type="button" id="btnPause" onclick="pauseFarm()" class="hidden flex-1 bg-amber-600 hover:bg-amber-500 text-white font-bold py-4 rounded-xl shadow-lg transition">⏸ Pausar</button>
+                    <button type="button" id="btnResume" onclick="resumeFarm()" class="hidden flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg transition">▶ Continuar</button>
+                    <button type="button" id="btnStop" onclick="stopFarm()" class="hidden flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-4 rounded-xl shadow-lg transition">⏹ Desligar</button>
+                </div>
+                <p id="loginHint" class="hidden text-xs text-center text-gray-500 pt-1">🔒 Faça login na aba Sessão para liberar o motor.</p>
+
+                <div id="guardPrompt" class="hidden p-4 bg-amber-900/30 border border-amber-700 rounded-xl">
+                    <p class="text-xs text-amber-300 font-bold mb-2">🔐 Steam Guard: digite o código recebido</p>
+                    <div class="flex gap-2">
+                        <input type="text" id="guardCode" maxlength="6" placeholder="ABCDE" class="flex-1 p-2.5 bg-black rounded-lg border border-amber-700 outline-none font-mono uppercase tracking-widest text-center">
+                        <button onclick="submitGuardCode()" class="bg-amber-600 hover:bg-amber-500 text-white font-bold px-4 rounded-lg">OK</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ ABA CONQUISTAS ============ -->
+        <div id="achievements" class="tab-content space-y-4 flex-1">
+            <div class="p-5 bg-[#18181b] rounded-xl border border-gray-800">
+                <h3 class="text-sm font-bold text-gray-300 mb-2">Desbloqueio via Rede (SAM Web)</h3>
+                <p class="text-xs text-gray-500 mb-4">Motor precisa estar ativo. Não requer o .exe do jogo nem cliente Steam aberto.</p>
+                <input type="text" id="achAppId" placeholder="AppID (Ex: 730)" class="w-full mb-3 p-3 bg-black rounded-lg border border-gray-700 outline-none focus:border-purple-500 text-sm">
+                <div class="flex gap-2 mb-3">
+                    <input type="text" id="achId" placeholder="API Name (Ex: WIN_BOMB_PLANT)" class="flex-1 p-3 bg-black rounded-lg border border-gray-700 outline-none focus:border-purple-500 text-sm">
+                    <button onclick="loadSchema()" class="bg-gray-700 hover:bg-gray-600 text-white font-bold px-3 rounded-lg text-sm" title="Listar conquistas do jogo">📋</button>
+                </div>
+                <div id="schemaList" class="hidden max-h-40 overflow-y-auto mb-3 bg-black rounded-lg border border-gray-800 p-2 text-xs font-mono"></div>
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="unlockAchievement('unlock')" class="bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-lg shadow transition text-sm">✅ Desbloquear</button>
+                    <button onclick="unlockAchievement('clear')" class="bg-red-700 hover:bg-red-600 text-white font-bold py-3 rounded-lg shadow transition text-sm">🔒 Recolocar (lock)</button>
+                </div>
+                <button onclick="bulkUnlock()" class="w-full mt-2 bg-orange-600 hover:bg-orange-500 text-white font-bold py-3 rounded-lg shadow transition text-sm">🔥 Bulk Unlock (todas)</button>
+            </div>
+        </div>
+
+        <!-- Modal QR -->
+        <div id="qrModal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-6">
+            <div class="bg-[#18181b] rounded-2xl border border-gray-800 p-6 max-w-xs w-full text-center">
+                <h3 class="font-bold mb-1">📱 Escaneie com o app Steam</h3>
+                <p class="text-xs text-gray-500 mb-4">Steam Mobile → (ícone escanear no topo) → aprovar</p>
+                <img id="qrImg" src="" class="mx-auto rounded-lg bg-white p-2" alt="QR Code">
+                <p class="text-[10px] text-gray-600 mt-3 break-all" id="qrUrl"></p>
+                <button onclick="closeQr()" class="mt-4 text-xs text-gray-400 hover:text-white">fechar e cancelar</button>
+            </div>
+        </div>
+
+        <!-- Console -->
+        <div class="mt-6 pb-2">
+            <div class="flex items-center justify-between mb-2 px-1">
+                <h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider">Terminal do Motor</h3>
+                <span class="relative flex h-2.5 w-2.5"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500"></span></span>
+            </div>
+            <div id="logs" class="log-box bg-[#050505] p-4 rounded-xl h-48 overflow-y-auto border border-gray-800 shadow-inner"></div>
+        </div>
+    </div>
+
+<script>
+    const socket = io();
+    const logsDiv = document.getElementById('logs');
+
+    function switchTab(ev, tabId) {
+        document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+        document.getElementById(tabId).classList.add('active');
+        ev.target.classList.add('active');
+    }
+
+    socket.on('log', (data) => {
+        const p = document.createElement('div');
+        p.textContent = data.message;
+        p.className = `mb-1 log-${data.type}`;
+        logsDiv.appendChild(p);
+        while (logsDiv.children.length > 200) logsDiv.removeChild(logsDiv.firstChild);
+        logsDiv.scrollTop = logsDiv.scrollHeight;
+    });
+
+    socket.on('state', (s) => {
+        updateControls(s);
+        document.getElementById('guardPrompt').classList.toggle('hidden', !s.awaitingGuard);
+        document.getElementById('loggedAs').classList.toggle('hidden', !s.loggedIn);
+        document.getElementById('loggedAsText').textContent = s.loggedIn ? `✅ Logado${s.steamId ? ' · ' + s.steamId : ''}` : '';
+    });
+
+    function updateControls(s) {
+        // Fluxo exigido: INICIAR → (PAUSAR | CONTINUAR) → DESLIGAR
+        const bStart = document.getElementById('btnStart'),
+              bPause = document.getElementById('btnPause'),
+              bResume = document.getElementById('btnResume'),
+              bStop = document.getElementById('btnStop'),
+              hint = document.getElementById('loginHint');
+        bStart.classList.toggle('hidden', s.isFarming); // some quando farmando
+        bPause.classList.toggle('hidden', !s.isFarming || s.isPaused);
+        bResume.classList.toggle('hidden', !(s.isFarming && s.isPaused));
+        bStop.classList.toggle('hidden', !s.isFarming);
+        hint.classList.toggle('hidden', !(!s.loggedIn && !s.isFarming));
+    }
+
+    async function post(url, body) {
+        const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+        return res.json();
+    }
+
+    // ---- Auto-login: recupera sessão salva ao abrir o app ----
+    async function bootAutoLogin() {
+        try {
+            const st = await fetch('/api/state').then(r => r.json());
+            if (!st.hasSavedLogin || st.loggedIn) {
+                updateControls(st);
+                return;
+            }
+            const out = await post('/api/autologin');
+            if (out.error) console.log('auto-login indisponível:', out.error);
+        } catch (e) { /* servidor ainda subindo */ }
+    }
+    bootAutoLogin();
+
+    // ---- Etapa 2 · Método 1: senha ----
+    async function loginPassword() {
+        const body = {
+            username: document.getElementById('username').value,
+            password: document.getElementById('password').value,
+            sharedSecret: document.getElementById('sharedSecret').value,
+            remember: document.getElementById('remember').checked,
+            status: document.getElementById('status').value,
+            mode: document.getElementById('mode').value,
+            games: document.getElementById('games').value,
+            customTitle: document.getElementById('customTitle').value
+        };
+        const out = await post('/api/login/password', body);
+        if (out.error) alert('Erro: ' + out.error);
+    }
+
+    async function submitGuardCode() {
+        const code = document.getElementById('guardCode').value.trim();
+        const out = await post('/api/steamguard-code', { code });
+        if (out.error) alert('Código rejeitado: ' + out.error);
+        else document.getElementById('guardPrompt').classList.add('hidden');
+    }
+
+    // ---- Etapa 2 · Método 2: QR ----
+    async function startQrLogin() {
+        const body = {
+            mode: document.getElementById('mode').value,
+            games: document.getElementById('games').value,
+            customTitle: document.getElementById('customTitle').value,
+            status: document.getElementById('status').value
+        };
+        const out = await post('/api/login/qr', body);
+        if (out.error) { alert('Erro: ' + out.error); return; }
+        document.getElementById('qrImg').src = out.qrDataUrl;
+        document.getElementById('qrUrl').textContent = out.challengeUrl;
+        document.getElementById('qrModal').classList.remove('hidden');
+    }
+
+    function closeQr() {
+        document.getElementById('qrModal').classList.add('hidden');
+    }
+
+    // ---- Etapa 2 · Método 3: web cookie ----
+    function showWebLogin() { document.getElementById('webLoginBox').classList.toggle('hidden'); }
+
+    async function loginWeb() {
+        const out = await post('/api/login/web', { steamLoginSecure: document.getElementById('webCookie').value.trim() });
+        if (out.error) alert('Erro: ' + out.error);
+    }
+
+    // ---- Painel ----
+    async function startFarm() {
+        const out = await post('/api/start', {
+            mode: document.getElementById('mode').value,
+            games: document.getElementById('games').value,
+            customTitle: document.getElementById('customTitle').value
+        });
+        if (out.error) alert(out.error);
+    }
+    async function pauseFarm() { await post('/api/pause'); }
+    async function resumeFarm() { await post('/api/start', {}); } // retoma com config salva
+    async function stopFarm() { await post('/api/stop'); }
+    async function logout() {
+        if (!confirm('Sair e apagar as credenciais salvas deste dispositivo?')) return;
+        await post('/api/logout');
+        document.getElementById('loggedAs').classList.add('hidden');
+    }
+
+    // ---- Conquistas ----
+    async function unlockAchievement(mode) {
+        const out = await post('/api/achievements', { appId: document.getElementById('achAppId').value.trim(), achievementId: document.getElementById('achId').value.trim(), mode });
+        if (out.error) alert('Falhou: ' + out.error);
+    }
+
+    async function bulkUnlock() {
+        if (!confirm('Desbloquear TODAS as conquistas deste jogo?')) return;
+        const out = await post('/api/achievements/bulk', { appId: document.getElementById('achAppId').value.trim() });
+        if (out.error) alert('Falhou: ' + out.error);
+    }
+
+    async function loadSchema() {
+        const appId = document.getElementById('achAppId').value.trim();
+        const box = document.getElementById('schemaList');
+        box.classList.remove('hidden');
+        box.textContent = 'carregando...';
+        const res = await fetch('/api/achievements/schema/' + appId);
+        const json = await res.json();
+        if (json.error) { box.textContent = 'Erro: ' + json.error; return; }
+        box.innerHTML = json.achievements.map(a => `<div class="hover:bg-gray-900 cursor-pointer" onclick="pickAch('${a.apiName}')">${a.index}: ${a.displayName} <span class="text-gray-600">(${a.apiName})</span></div>`).join('');
+    }
+    function pickAch(name) {
+        document.getElementById('achId').value = name;
+        document.getElementById('schemaList').classList.add('hidden');
+    }
+</script>
+</body>
+</html>

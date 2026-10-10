@@ -1,0 +1,23 @@
+{
+  "name": "steam-multi-farm-pro",
+  "version": "2.0.0",
+  "description": "Steam Multi-Farm PRO - Motor de farm de horas, cartas e desbloqueio de conquistas (SAM via rede)",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1",
+    "steam-user": "^5.0.4",
+    "steam-session": "^1.5.2",
+    "steamcommunity": "^3.48.0",
+    "steam-totp": "^2.1.2",
+    "steamid": "^2.1.0",
+    "cheerio": "^1.0.0",
+    "qrcode": "^1.5.4"
+  }
+}
