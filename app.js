@@ -24,6 +24,20 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+// CORS liberado: a WebView Capacitor roda em origens diferentes (https://localhost,
+// http://localhost:32123 via iframe, etc.) e o service Android consome sem Origin.
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') { res.status(204).end(); return; }
+    next();
+});
+
+// Ring buffer dos últimos 500 logs — usado pelo painel de diagnóstico do APK
+// (a WebView pode não conseguir abrir o WebSocket após redirecionamento de origem).
+const logBuffer = [];
+
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -34,8 +48,15 @@ function logToUI(message, type = 'info') {
     const time = new Date().toLocaleTimeString();
     const logMsg = `[${time}] ${message}`;
     console.log(logMsg);
+    logBuffer.push({ message: logMsg, type });
+    if (logBuffer.length > 500) logBuffer.shift();
     io.emit('log', { message: logMsg, type });
 }
+
+// Últimos logs em JSON (painel de diagnóstico da WebView)
+app.get('/api/logs', (req, res) => {
+    res.json({ logs: logBuffer.slice(-200) });
+});
 
 // ---------------------------------------------------------------------
 // Motor — uma sessão Steam ativa
@@ -46,6 +67,31 @@ let bot = null;         // BotSession (HourBoostr port)
 let cards = null;       // CardFarm
 let achievements = null;// AchievementsModule
 let authManager = null; // AuthManager
+
+// ---------------------------------------------------------------------
+// Nomes de jogos (para o painel e para a notificação do APK)
+// ---------------------------------------------------------------------
+const gameNameCache = new Map(); // appid -> nome
+
+async function resolveGameNames(appids) {
+    const ids = [...new Set((appids || []).filter(x => typeof x === 'number'))];
+    const missing = ids.filter(id => !gameNameCache.has(id));
+    if (missing.length && client && client.steamID) {
+        try {
+            const out = await client.getProductInfo(missing, [], true);
+            for (const [appid, info] of Object.entries(out.apps || {})) {
+                const common = info.appinfo && info.appinfo.common;
+                const name = common && (common.name || common.name_localized && common.name_localized.english);
+                gameNameCache.set(Number(appid), name || `App ${appid}`);
+            }
+            for (const id of missing) if (!gameNameCache.has(id)) gameNameCache.set(id, `App ${id}`);
+        } catch (e) {
+            logToUI('Não foi possível obter nomes dos jogos: ' + e.message, 'warning');
+            for (const id of missing) if (!gameNameCache.has(id)) gameNameCache.set(id, `App ${id}`);
+        }
+    }
+    return ids.map(id => gameNameCache.get(id) || `App ${id}`);
+}
 
 const state = {
     isFarming: false,
@@ -240,6 +286,25 @@ function publishState() {
         awaitingGuard: !!state.pendingGuardLogin,
         steamId: client && client.steamID ? client.steamID.getSteamID64() : null,
         games: state.gamesToPlay || []
+    });
+}
+
+// publishState com nomes resolvidos (.async p/ não bloquear o emit básico)
+async function publishStateWithNames() {
+    const numeric = (state.gamesToPlay || []).filter(x => typeof x === 'number');
+    const names = numeric.length ? (await resolveGameNames(numeric)) : [];
+    const customTitle = (state.gamesToPlay || []).find(x => typeof x === 'string');
+    io.emit('state', {
+        isFarming: state.isFarming,
+        isPaused: state.isPaused,
+        mode: state.mode,
+        loggedIn: state.loggedIn,
+        hasSavedLogin: !!(savedCreds && savedCreds.refreshToken),
+        awaitingGuard: !!state.pendingGuardLogin,
+        steamId: client && client.steamID ? client.steamID.getSteamID64() : null,
+        games: state.gamesToPlay || [],
+        gameNames: names,
+        customTitle: customTitle || null
     });
 }
 
@@ -450,6 +515,13 @@ app.post('/api/logout', (req, res) => {
 });
 
 // Foto/nome do perfil (usado pela notificação do APK e pela UI)
+// Nomes dos jogos atualmente configurados (usado pela notificação do APK)
+app.get('/api/gameNames', async (req, res) => {
+    const names = await resolveGameNames(state.gamesToPlay);
+    const customTitle = (state.gamesToPlay || []).find(x => typeof x === 'string') || null;
+    res.json({ gameNames: names, customTitle, isFarming: state.isFarming, isPaused: state.isPaused, loggedIn: state.loggedIn });
+});
+
 app.get('/api/profile', async (req, res) => {
     if (!community || !community.steamID) {
         return res.status(400).json({ error: 'Sem sessão web ativa.' });
@@ -534,7 +606,8 @@ app.get('/api/state', (req, res) => {
         hasSavedLogin: !!(savedCreds && savedCreds.refreshToken),
         awaitingGuard: !!state.pendingGuardLogin,
         steamId: client && client.steamID ? client.steamID.getSteamID64() : null,
-        games: state.gamesToPlay || []
+        games: state.gamesToPlay || [],
+        customTitle: (state.gamesToPlay || []).find(x => typeof x === 'string') || null
     });
 });
 
